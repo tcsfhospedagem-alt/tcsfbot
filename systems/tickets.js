@@ -133,6 +133,25 @@ async function addMemberToTicket(channel, member) {
   }, { reason: `Adicionado ao ticket por ${member.user.tag}` });
 }
 
+async function notifyTicketOwnerLeft(member) {
+  if (member.guild.id !== CONTRACT_GUILD_ID) return;
+
+  const channels = await member.guild.channels.fetch();
+  for (const channel of channels.values()) {
+    const metadata = channel?.type === ChannelType.GuildText ? getTicketMetadata(channel) : null;
+    if (!metadata || metadata.ownerId !== member.id || !isTicketChannel(channel)) continue;
+
+    try {
+      await channel.send({
+        content: '⚠️ Este usuário que criou o ticket saiu do servidor.',
+        allowedMentions: { parse: [] }
+      });
+    } catch (error) {
+      console.error(`Erro ao avisar sobre a saída do criador no ticket ${channel.id}:`, error);
+    }
+  }
+}
+
 function hasTicketStaffRole(member) {
   return TICKET_STAFF_ROLE_IDS.some(roleId => member.roles.cache.has(roleId));
 }
@@ -374,4 +393,10 @@ async function handleTicketInteraction(interaction) {
   return false;
 }
 
-module.exports = { loadTicketSystem, handleTicketInteraction, isTicketChannel, addMemberToTicket };
+module.exports = {
+  loadTicketSystem,
+  handleTicketInteraction,
+  isTicketChannel,
+  addMemberToTicket,
+  notifyTicketOwnerLeft
+};
