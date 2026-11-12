@@ -113,11 +113,6 @@ module.exports = {
             { name: 'Team', value: contractData.teamName, inline: true },
             { name: 'Position', value: contractData.position, inline: true },
             { name: 'Role', value: contractData.role, inline: true },
-            {
-              name: `Roster (${teamRole?.members.size ?? 0}/${ROSTER_CAP})`,
-              value: teamRole?.members.map(rosterMember => `${rosterMember}`).join('\n') || 'Nenhum jogador no roster.',
-              inline: false
-            },
             { name: 'Signed on', value: `<t:${Math.floor(now.getTime() / 1000)}:F>`, inline: false },
           )
           .setFooter({ text: `TCSF - Season 1 • ${new Date().toLocaleDateString('pt-BR')}` })
