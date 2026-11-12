@@ -1,8 +1,63 @@
-const { Events, PermissionFlagsBits } = require('discord.js');
-const { ALLOWED_COMMAND_ROLES, ALLOWED_FA_CHANNELS, ALLOWED_CONTRACT_CHANNELS, ALLOWED_SCOUTING_CHANNELS, ALLOWED_RELEASE_CHANNELS } = require('../config/constants');
+const { Events, EmbedBuilder, InteractionType, PermissionFlagsBits } = require('discord.js');
+const {
+  ALLOWED_COMMAND_ROLES,
+  ALLOWED_FA_CHANNELS,
+  ALLOWED_CONTRACT_CHANNELS,
+  ALLOWED_SCOUTING_CHANNELS,
+  ALLOWED_RELEASE_CHANNELS,
+  EXTERNAL_COMMAND_LOG_CHANNEL_ID
+} = require('../config/constants');
 
 const INVITE_REGEX = /(discord\.(gg|io|me|li)|discordapp\.com\/invite|discord\.com\/invite)\/[a-zA-Z0-9]+/i;
 const DIVULGACAO_REGEX = /^algu[eé]m\s+quer\s+entrar/i;
+const loggedExternalInteractions = new Map();
+
+async function logExternalCommand(message, client) {
+  if (!message.guild || !message.author.bot || !message.applicationId) return;
+  if (message.applicationId === client.user?.id) return;
+
+  const interaction = message.interactionMetadata ?? message.interaction;
+  if (!interaction || interaction.type !== InteractionType.ApplicationCommand) return;
+
+  const now = Date.now();
+  for (const [id, timestamp] of loggedExternalInteractions) {
+    if (now - timestamp > 60 * 60 * 1000) loggedExternalInteractions.delete(id);
+  }
+  if (loggedExternalInteractions.has(interaction.id)) return;
+
+  try {
+    const logChannel = await client.channels.fetch(EXTERNAL_COMMAND_LOG_CHANNEL_ID);
+    if (!logChannel?.isTextBased() || typeof logChannel.send !== 'function') {
+      throw new Error(`Canal de logs inválido: ${EXTERNAL_COMMAND_LOG_CHANNEL_ID}`);
+    }
+
+    const commandName = message.interaction?.commandName;
+    const commandValue = commandName
+      ? `/${commandName}`
+      : 'Comando utilizado (nome não informado pelo Discord)';
+    const embed = new EmbedBuilder()
+      .setColor(0x5865f2)
+      .setTitle('Uso de comando de aplicativo externo')
+      .addFields(
+        { name: 'Usuário', value: `${interaction.user} (\`${interaction.user.tag}\`)`, inline: false },
+        { name: 'Comando', value: commandValue, inline: true },
+        { name: 'Aplicativo', value: `${message.author.tag} (\`${message.applicationId}\`)`, inline: true },
+        { name: 'Canal de uso', value: `<#${message.channelId}>`, inline: true }
+      )
+      .setTimestamp();
+
+    await logChannel.send({
+      embeds: [embed],
+      allowedMentions: { parse: [] }
+    });
+    loggedExternalInteractions.set(interaction.id, now);
+    if (loggedExternalInteractions.size > 5000) {
+      loggedExternalInteractions.delete(loggedExternalInteractions.keys().next().value);
+    }
+  } catch (error) {
+    console.error('Erro ao registrar uso de comando externo:', error);
+  }
+}
 
 const AUTO_RESPONSES = [
   {
@@ -62,6 +117,8 @@ const AUTO_RESPONSES = [
 module.exports = {
   name: Events.MessageCreate,
   async execute(message, client) {
+    await logExternalCommand(message, client);
+
     if (message.author.bot) return;
     if (!message.guild) return;
 
