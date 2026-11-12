@@ -136,7 +136,6 @@ module.exports = {
         { name: 'Position', value: position, inline: true },
         { name: 'Role', value: role, inline: true },
         { name: 'Emergências ativas', value: `${emergencyCount}/${EMERGENCY_CONTRACT_LIMIT}`, inline: true },
-        { name: 'Roster', value: `${rosterCount}/${ROSTER_CAP}`, inline: true },
       )
       .setFooter({ text: `TCSF • ${new Date().toLocaleDateString('pt-BR')}` })
       .setTimestamp();
