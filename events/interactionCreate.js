@@ -12,8 +12,13 @@ module.exports = {
     try {
       if (await handleRobloxVerificationInteraction(interaction)) return;
     } catch (error) {
+      if (error?.code === 10062) return;
+      if (error?.code === 40060) {
+        console.warn('Interação de verificação já reconhecida. Verifique se há mais de uma instância do bot ativa.');
+        return;
+      }
+
       console.error('Erro ao processar interação de verificação Roblox:', error);
-      if (error?.code === 10062 || error?.code === 40060) return;
 
       try {
         if (interaction.replied || interaction.deferred) {
