@@ -4,10 +4,34 @@ const { pendingContracts, activeContracts, saveContracts, countActiveEmergencyCo
 const { getTransferWindow, setTransferWindow } = require('../systems/transferWindow');
 const { buildTransferWindowEmbed, buildTransferWindowSelectMenu } = require('../commands/janela');
 const { handleTicketInteraction } = require('../systems/tickets');
+const { handleRobloxVerificationInteraction } = require('../systems/robloxVerification');
 
 module.exports = {
   name: Events.InteractionCreate,
   async execute(interaction, client) {
+    try {
+      if (await handleRobloxVerificationInteraction(interaction)) return;
+    } catch (error) {
+      console.error('Erro ao processar interação de verificação Roblox:', error);
+      if (error?.code === 10062 || error?.code === 40060) return;
+
+      try {
+        if (interaction.replied || interaction.deferred) {
+          await interaction.editReply({ content: '❌ Ocorreu um erro na verificação. Tente novamente pelo painel.' });
+        } else {
+          await interaction.reply({
+            content: '❌ Ocorreu um erro na verificação. Tente novamente pelo painel.',
+            flags: MessageFlags.Ephemeral
+          });
+        }
+      } catch (responseError) {
+        if (responseError?.code !== 10062 && responseError?.code !== 40060) {
+          console.error('Erro ao responder à interação de verificação Roblox:', responseError);
+        }
+      }
+      return;
+    }
+
     if (await handleTicketInteraction(interaction)) return;
 
     if (interaction.isChatInputCommand()) {
