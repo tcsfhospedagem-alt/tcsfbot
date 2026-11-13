@@ -141,6 +141,9 @@ async function fetchAssignableRoles(guild) {
   if (!botMember.permissions.has(PermissionFlagsBits.ManageRoles)) {
     throw new Error('O bot precisa da permissão **Gerenciar cargos** para concluir a verificação.');
   }
+  if (!botMember.permissions.has(PermissionFlagsBits.ManageNicknames)) {
+    throw new Error('O bot precisa da permissão **Gerenciar apelidos** para concluir a verificação.');
+  }
 
   const [roles, restrictedRole] = await Promise.all([
     Promise.all(ROBLOX_VERIFIED_ROLE_IDS.map(roleId => guild.roles.fetch(roleId))),
@@ -252,6 +255,10 @@ async function handleVerifyButton(interaction) {
 
     const { roles, restrictedRole } = await fetchAssignableRoles(interaction.guild);
     const member = await interaction.guild.members.fetch(interaction.user.id);
+    if (member.id === interaction.guild.ownerId || !member.manageable) {
+      throw new Error('O cargo mais alto do bot precisa ficar acima do seu cargo mais alto para alterar seu apelido.');
+    }
+
     await member.roles.add(
       roles,
       `Verificação da conta Roblox @${verification.username} concluída por ${interaction.user.tag}`
@@ -262,8 +269,22 @@ async function handleVerifyButton(interaction) {
     );
     pendingVerifications.delete(code);
 
+    try {
+      if (member.nickname !== verification.username) {
+        await member.setNickname(
+          verification.username,
+          `Conta Roblox @${verification.username} verificada por ${interaction.user.tag}`
+        );
+      }
+    } catch (error) {
+      console.error(`Conta Roblox @${verification.username} verificada, mas não foi possível alterar o apelido:`, error);
+      return interaction.editReply(
+        `✅ Conta Roblox **${verification.username}** verificada! Você recebeu ${roles.map(role => `<@&${role.id}>`).join(' e ')} e o cargo <@&${restrictedRole.id}> foi removido.\n⚠️ Não consegui alterar seu apelido. Verifique a permissão **Gerenciar apelidos** e a posição dos cargos do bot; depois, inicie uma nova verificação.`
+      );
+    }
+
     return interaction.editReply(
-      `✅ Conta Roblox **${verification.username}** verificada! Você recebeu ${roles.map(role => `<@&${role.id}>`).join(' e ')} e o cargo <@&${restrictedRole.id}> foi removido.`
+      `✅ Conta Roblox **${verification.username}** verificada! Seu apelido foi atualizado para **${verification.username}**, você recebeu ${roles.map(role => `<@&${role.id}>`).join(' e ')} e o cargo <@&${restrictedRole.id}> foi removido.`
     );
   } catch (error) {
     console.error('Erro ao confirmar verificação Roblox:', error);
