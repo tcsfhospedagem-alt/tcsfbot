@@ -28,21 +28,15 @@ module.exports = {
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels),
 
   async execute(interaction) {
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
     if (!interaction.inGuild() || interaction.guildId !== CONTRACT_GUILD_ID) {
-      return interaction.reply({
-        content: '❌ Este comando só pode ser usado no servidor configurado.',
-        flags: MessageFlags.Ephemeral
-      });
+      return interaction.editReply('❌ Este comando só pode ser usado no servidor configurado.');
     }
 
     if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageChannels)) {
-      return interaction.reply({
-        content: '❌ Você precisa da permissão **Gerenciar canais** para usar este comando.',
-        flags: MessageFlags.Ephemeral
-      });
+      return interaction.editReply('❌ Você precisa da permissão **Gerenciar canais** para usar este comando.');
     }
-
-    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
     const botMember = await interaction.guild.members.fetchMe();
     if (!botMember.permissions.has(PermissionFlagsBits.ManageChannels)) {
