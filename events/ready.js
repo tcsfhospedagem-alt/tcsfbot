@@ -4,6 +4,7 @@ const path = require('path');
 const { loadContracts } = require('../systems/contracts');
 const { loadTransferWindow } = require('../systems/transferWindow');
 const { loadTicketSystem } = require('../systems/tickets');
+const { loadRobloxVerificationPanel } = require('../systems/robloxVerification');
 
 module.exports = {
   name: Events.ClientReady,
@@ -19,6 +20,12 @@ module.exports = {
       console.log('✅ Painel de tickets carregado!');
     } catch (error) {
       console.error('❌ Erro ao carregar painel de tickets:', error);
+    }
+    try {
+      await loadRobloxVerificationPanel(client);
+      console.log('✅ Painel de verificação Roblox carregado!');
+    } catch (error) {
+      console.error('❌ Erro ao carregar painel de verificação Roblox:', error);
     }
 
     client.user.setPresence({
