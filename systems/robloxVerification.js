@@ -178,8 +178,29 @@ function removeExpiredVerifications() {
   }
 }
 
+function isAlreadyVerified(member) {
+  return ROBLOX_VERIFIED_ROLE_IDS.every(roleId => member.roles.cache.has(roleId));
+}
+
+function removeUserVerifications(userId) {
+  for (const [code, verification] of pendingVerifications) {
+    if (verification.discordUserId === userId) pendingVerifications.delete(code);
+  }
+}
+
 async function handleUsernameModal(interaction) {
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+  try {
+    const member = await interaction.guild.members.fetch(interaction.user.id);
+    if (isAlreadyVerified(member)) {
+      removeUserVerifications(interaction.user.id);
+      return interaction.editReply('✅ Você já está verificado e possui os cargos necessários.');
+    }
+  } catch (error) {
+    console.error('Erro ao verificar os cargos do membro antes da verificação Roblox:', error);
+    return interaction.editReply('❌ Não consegui consultar seus cargos no servidor. Tente novamente.');
+  }
 
   const username = interaction.fields.getTextInputValue(USERNAME_INPUT_ID).trim();
   if (!/^[A-Za-z0-9_]{3,20}$/.test(username)) {
@@ -248,13 +269,24 @@ async function handleVerifyButton(interaction) {
   }
 
   try {
+    let member = await interaction.guild.members.fetch(interaction.user.id);
+    if (isAlreadyVerified(member)) {
+      removeUserVerifications(interaction.user.id);
+      return interaction.editReply('✅ Você já está verificado e possui os cargos necessários.');
+    }
+
     const profile = await fetchRobloxJson(`https://users.roblox.com/v1/users/${verification.robloxUserId}`);
     if (!profile.description?.includes(verification.code)) {
       return interaction.editReply('❌ Não encontrei o código na bio dessa conta. Adicione-o e tente novamente.');
     }
 
     const { roles, restrictedRole } = await fetchAssignableRoles(interaction.guild);
-    const member = await interaction.guild.members.fetch(interaction.user.id);
+    member = await interaction.guild.members.fetch(interaction.user.id);
+    if (isAlreadyVerified(member)) {
+      removeUserVerifications(interaction.user.id);
+      return interaction.editReply('✅ Você já está verificado e possui os cargos necessários.');
+    }
+
     if (member.id === interaction.guild.ownerId || !member.manageable) {
       throw new Error('O cargo mais alto do bot precisa ficar acima do seu cargo mais alto para alterar seu apelido.');
     }
