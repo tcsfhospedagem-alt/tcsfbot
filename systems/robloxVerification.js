@@ -33,9 +33,7 @@ function buildPanelPayload() {
       '',
       '1. Clique no botão abaixo e informe seu **nome de usuário Roblox**.',
       '2. Coloque o código temporário recebido na **descrição da sua conta Roblox**.',
-      '3. Clique em **Verificar bio** para confirmar.',
-      '',
-      'O bot confirma que a conta existe e verifica o código pela API pública do Roblox. O código expira em 10 minutos.'
+      '3. Clique em **Verificar bio** para confirmar.'
     ].join('\n'));
 
   const button = new ButtonBuilder()
