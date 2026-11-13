@@ -302,6 +302,8 @@ async function handleRobloxVerificationInteraction(interaction) {
       .setMaxLength(20)
       .setRequired(true);
 
+    if (interaction.replied || interaction.deferred) return true;
+
     await interaction.showModal(modal.addComponents(
       new ActionRowBuilder().addComponents(usernameInput)
     ));
