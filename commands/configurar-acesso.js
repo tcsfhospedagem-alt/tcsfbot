@@ -6,6 +6,8 @@ const {
 } = require('discord.js');
 const {
   CONTRACT_GUILD_ID,
+  LIMITED_ACCESS_CHANNEL_IDS,
+  LIMITED_ACCESS_ROLE_ID,
   READ_ONLY_ACCESS_ROLE_ID,
   STAFF_CATEGORY_IDS
 } = require('../config/constants');
@@ -56,25 +58,42 @@ module.exports = {
       });
     }
 
+    const limitedRole = await interaction.guild.roles.fetch(LIMITED_ACCESS_ROLE_ID);
+    if (!limitedRole) {
+      return interaction.editReply({
+        content: `❌ Não encontrei o cargo de acesso limitado (<@&${LIMITED_ACCESS_ROLE_ID}>). Nenhuma permissão foi alterada.`
+      });
+    }
+
     const channels = await interaction.guild.channels.fetch();
     const missingCategories = STAFF_CATEGORY_IDS.filter(categoryId => {
       const channel = channels.get(categoryId);
       return !channel || channel.type !== ChannelType.GuildCategory;
     });
 
-    if (missingCategories.length > 0) {
+    const missingAllowedChannels = LIMITED_ACCESS_CHANNEL_IDS.filter(channelId => !channels.has(channelId));
+
+    if (missingCategories.length > 0 || missingAllowedChannels.length > 0) {
+      const missingItems = [
+        ...missingCategories.map(id => `categoria de staff \`${id}\``),
+        ...missingAllowedChannels.map(id => `canal permitido \`${id}\``)
+      ];
       return interaction.editReply({
-        content: `❌ Não encontrei estas categorias de staff: ${missingCategories.map(id => `\`${id}\``).join(', ')}. Nenhuma permissão foi alterada.`
+        content: `❌ Não encontrei ${missingItems.join(', ')}. Nenhuma permissão foi alterada.`
       });
     }
 
     const staffCategoryIds = new Set(STAFF_CATEGORY_IDS);
+    const limitedAccessChannelIds = new Set(LIMITED_ACCESS_CHANNEL_IDS);
     let configuredCount = 0;
     let staffChannelCount = 0;
-    const failedChannelIds = [];
+    let limitedRoleCount = 0;
+    let everyoneCount = 0;
+    const failedOverwrites = [];
 
     for (const channel of channels.values()) {
       const isStaffChannel = staffCategoryIds.has(channel.id) || staffCategoryIds.has(channel.parentId);
+      const isLimitedAccessChannel = limitedAccessChannelIds.has(channel.id);
       const permissions = isStaffChannel
         ? { ...READ_ONLY_PERMISSIONS, ViewChannel: false }
         : READ_ONLY_PERMISSIONS;
@@ -86,21 +105,45 @@ module.exports = {
         configuredCount += 1;
         if (isStaffChannel) staffChannelCount += 1;
       } catch (error) {
-        console.error(`Erro ao configurar permissões no canal ${channel.id}:`, error);
-        failedChannelIds.push(channel.id);
+        console.error(`Erro ao configurar o cargo de leitura no canal ${channel.id}:`, error);
+        failedOverwrites.push(`${channel.id} (cargo de leitura)`);
+      }
+
+      try {
+        await channel.permissionOverwrites.edit(limitedRole, {
+          ViewChannel: isLimitedAccessChannel
+        }, {
+          reason: `Restrição de visibilidade do cargo por ${interaction.user.tag}`
+        });
+        limitedRoleCount += 1;
+      } catch (error) {
+        console.error(`Erro ao configurar o cargo de acesso limitado no canal ${channel.id}:`, error);
+        failedOverwrites.push(`${channel.id} (cargo limitado)`);
+      }
+
+      try {
+        await channel.permissionOverwrites.edit(interaction.guild.roles.everyone, {
+          ViewChannel: isLimitedAccessChannel
+        }, {
+          reason: `Restrição de visibilidade de @everyone por ${interaction.user.tag}`
+        });
+        everyoneCount += 1;
+      } catch (error) {
+        console.error(`Erro ao configurar @everyone no canal ${channel.id}:`, error);
+        failedOverwrites.push(`${channel.id} (@everyone)`);
       }
     }
 
     const result = [
-      `${failedChannelIds.length === 0 ? '✅' : '⚠️'} Cargo <@&${role.id}> configurado em **${configuredCount}** canais.`,
-      `Canais de staff sem acesso: **${staffChannelCount}**.`
+      `${failedOverwrites.length === 0 ? '✅' : '⚠️'} Cargo <@&${role.id}> configurado em **${configuredCount}** canais; staff sem acesso: **${staffChannelCount}**.`,
+      `Cargo <@&${limitedRole.id}> e @everyone: visíveis somente em <#${LIMITED_ACCESS_CHANNEL_IDS.join('> e <#')}> (**${limitedRoleCount}** e **${everyoneCount}** permissões aplicadas).`
     ];
 
-    if (failedChannelIds.length > 0) {
-      result.push(`⚠️ Falha ao configurar ${failedChannelIds.length} canal(is): ${failedChannelIds.slice(0, 10).map(id => `\`${id}\``).join(', ')}${failedChannelIds.length > 10 ? ', ...' : ''}.`);
+    if (failedOverwrites.length > 0) {
+      result.push(`⚠️ Falha em ${failedOverwrites.length} configuração(ões): ${failedOverwrites.slice(0, 10).map(item => `\`${item}\``).join(', ')}${failedOverwrites.length > 10 ? ', ...' : ''}.`);
     }
 
-    result.push('O cargo não poderá enviar mensagens, conversar em tópicos, criar tópicos públicos/privados ou reagir. Membros com **Administrador** ignoram essas restrições do Discord.');
+    result.push('O cargo de leitura não poderá enviar mensagens, conversar em tópicos, criar tópicos públicos/privados ou reagir. No Discord, permissões de visualização concedidas por outros cargos podem prevalecer sobre a restrição de @everyone; cargos com **Administrador** sempre ignoram restrições.');
     return interaction.editReply({ content: result.join('\n') });
   }
 };
