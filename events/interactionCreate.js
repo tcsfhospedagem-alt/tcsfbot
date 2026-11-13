@@ -18,10 +18,18 @@ module.exports = {
         await command.execute(interaction, client);
       } catch (error) {
         console.error(error);
-        if (interaction.replied || interaction.deferred) {
-          await interaction.followUp({ content: 'Ocorreu um erro ao executar este comando!', flags: MessageFlags.Ephemeral });
-        } else {
-          await interaction.reply({ content: 'Ocorreu um erro ao executar este comando!', flags: MessageFlags.Ephemeral });
+        if (error?.code === 10062 || error?.code === 40060) return;
+
+        try {
+          if (interaction.replied || interaction.deferred) {
+            await interaction.editReply({ content: 'Ocorreu um erro ao executar este comando!' });
+          } else {
+            await interaction.reply({ content: 'Ocorreu um erro ao executar este comando!', flags: MessageFlags.Ephemeral });
+          }
+        } catch (responseError) {
+          if (responseError?.code !== 10062 && responseError?.code !== 40060) {
+            console.error('Erro ao responder à interação do comando:', responseError);
+          }
         }
       }
     } else if (interaction.isButton()) {
