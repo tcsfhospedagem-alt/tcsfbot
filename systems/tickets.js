@@ -6,8 +6,11 @@ const {
   ChannelType,
   EmbedBuilder,
   MessageFlags,
+  ModalBuilder,
   PermissionFlagsBits,
-  StringSelectMenuBuilder
+  StringSelectMenuBuilder,
+  TextInputBuilder,
+  TextInputStyle
 } = require('discord.js');
 const {
   ALLOWED_SANCTION_ROLES,
@@ -15,6 +18,7 @@ const {
   TICKET_CATEGORY_ID,
   TICKET_CLOSE_OVERRIDE_ROLE_IDS,
   TICKET_PANEL_CHANNEL_ID,
+  TICKET_REVIEW_CHANNEL_ID,
   TICKET_TRANSCRIPT_CHANNEL_ID,
   TICKET_VIEW_ROLE_IDS
 } = require('../config/constants');
@@ -28,6 +32,8 @@ const TICKET_STAFF_ROLE_IDS = [...new Set([
 const OPEN_TICKET_MENU_ID = 'ticket_open';
 const CLAIM_TICKET_BUTTON_ID = 'ticket_claim';
 const CLOSE_TICKET_BUTTON_ID = 'ticket_close';
+const TICKET_RATING_BUTTON_PREFIX = 'ticket_rate';
+const TICKET_RATING_MODAL_PREFIX = 'ticket_reason';
 const TICKET_TYPES = [
   { label: 'Suporte Geral', value: 'suporte-geral', description: 'Tire dúvidas e peça ajuda.', emoji: '❓' },
   { label: 'Compras', value: 'compras', description: 'Ajuda com compras e pagamentos.', emoji: '🛒' },
@@ -75,6 +81,177 @@ function buildTicketButtons(claimed = false) {
       .setLabel('Fechar ticket')
       .setStyle(ButtonStyle.Danger)
   );
+}
+
+function buildRatingButtons(ticketId, staffId, disabled = false) {
+  return new ActionRowBuilder().addComponents(
+    [1, 2, 3, 4, 5].map(rating =>
+      new ButtonBuilder()
+        .setCustomId(`${TICKET_RATING_BUTTON_PREFIX}:${ticketId}:${staffId}:${rating}`)
+        .setLabel(`${rating} ${rating === 1 ? 'estrela' : 'estrelas'}`)
+        .setStyle(rating === 5 ? ButtonStyle.Success : ButtonStyle.Secondary)
+        .setDisabled(disabled)
+    )
+  );
+}
+
+function isRatingDm(interaction) {
+  return !interaction.guild &&
+    interaction.channel?.type === ChannelType.DM &&
+    interaction.message?.author?.id === interaction.client.user.id;
+}
+
+async function sendRatingRequest(client, metadata, ticketId, ticketName) {
+  const owner = await client.users.fetch(metadata.ownerId);
+  const staffId = metadata.claimedBy ?? metadata.closedBy;
+  const staffLabel = staffId ? `<@${staffId}>` : 'Não identificado';
+  const message = await owner.send({
+    embeds: [
+      new EmbedBuilder()
+        .setColor(0x5865f2)
+        .setTitle('Avalie seu atendimento')
+        .setDescription(`O ticket **#${ticketName}** foi fechado. Como foi sua experiência? Escolha de 1 a 5 estrelas e informe o motivo.`)
+        .addFields(
+          { name: 'Membro que abriu o ticket', value: `<@${metadata.ownerId}>`, inline: true },
+          { name: 'Staff responsável', value: staffLabel, inline: true }
+        )
+        .setFooter({ text: `Avaliação do ticket ${ticketId}` })
+        .setTimestamp()
+    ],
+    components: [buildRatingButtons(ticketId, staffId ?? '0')]
+  });
+  return message;
+}
+
+async function openRatingReasonModal(interaction) {
+  if (!isRatingDm(interaction)) {
+    return interaction.reply({ content: 'Esta avaliação só pode ser enviada pela DM do ticket.' });
+  }
+
+  const [, ticketId, staffId, ratingText] = interaction.customId.split(':');
+  const rating = Number(ratingText);
+  if (!/^\d+$/.test(ticketId) || !/^\d+$/.test(staffId) || !Number.isInteger(rating) || rating < 1 || rating > 5) {
+    return interaction.reply({ content: 'Este botão de avaliação é inválido.' });
+  }
+
+  const modal = new ModalBuilder()
+    .setCustomId(`${TICKET_RATING_MODAL_PREFIX}:${ticketId}:${staffId}:${interaction.message.id}:${rating}`)
+    .setTitle('Motivo da avaliação')
+    .addComponents(
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('reason')
+          .setLabel('Conte o motivo da sua nota')
+          .setStyle(TextInputStyle.Paragraph)
+          .setMinLength(3)
+          .setMaxLength(1000)
+          .setRequired(true)
+      )
+    );
+
+  await interaction.showModal(modal);
+}
+
+async function submitTicketRating(interaction) {
+  if (interaction.guild || interaction.channel?.type !== ChannelType.DM) {
+    return interaction.reply({ content: 'Esta avaliação só pode ser enviada pela DM do ticket.' });
+  }
+
+  const [, ticketId, staffId, messageId, ratingText] = interaction.customId.split(':');
+  const rating = Number(ratingText);
+  if (
+    !/^\d+$/.test(ticketId) ||
+    !/^\d+$/.test(staffId) ||
+    !/^\d+$/.test(messageId) ||
+    !Number.isInteger(rating) ||
+    rating < 1 ||
+    rating > 5
+  ) {
+    return interaction.reply({ content: 'Os dados desta avaliação são inválidos.' });
+  }
+
+  let promptMessage;
+  let promptDisabled = false;
+  let reviewSent = false;
+  try {
+    const reason = interaction.fields.getTextInputValue('reason').trim();
+    if (reason.length < 3) {
+      return interaction.reply({ content: 'Escreva um motivo com pelo menos 3 caracteres.' });
+    }
+
+    promptMessage = await interaction.channel.messages.fetch(messageId);
+    const ratingButtons = promptMessage.components[0]?.components ?? [];
+    if (
+      promptMessage.author.id !== interaction.client.user.id ||
+      promptMessage.embeds[0]?.footer?.text !== `Avaliação do ticket ${ticketId}` ||
+      ratingButtons.length !== 5 ||
+      !ratingButtons.some(component =>
+        component.customId === `${TICKET_RATING_BUTTON_PREFIX}:${ticketId}:${staffId}:${rating}`
+      ) ||
+      ratingButtons.some(component => component.disabled)
+    ) {
+      return interaction.reply({ content: 'Esta avaliação já foi enviada ou não é válida.' });
+    }
+
+    await interaction.deferReply();
+    await promptMessage.edit({ components: [buildRatingButtons(ticketId, staffId, true)] });
+    promptDisabled = true;
+
+    const reviewChannel = await interaction.client.channels.fetch(TICKET_REVIEW_CHANNEL_ID);
+    if (
+      !reviewChannel ||
+      reviewChannel.guildId !== CONTRACT_GUILD_ID ||
+      !reviewChannel.isTextBased() ||
+      !reviewChannel.send
+    ) {
+      throw new Error(`Canal de avaliações inválido: ${TICKET_REVIEW_CHANNEL_ID}`);
+    }
+
+    const staffLabel = staffId === '0' ? 'Não identificado' : `<@${staffId}>`;
+    await reviewChannel.send({
+      embeds: [
+        new EmbedBuilder()
+          .setColor(0xf1c40f)
+          .setTitle('Nova avaliação de ticket')
+          .addFields(
+            { name: 'Membro que abriu o ticket', value: `<@${interaction.user.id}>`, inline: true },
+            { name: 'Staff responsável', value: staffLabel, inline: true },
+            { name: 'Nota', value: `${'⭐'.repeat(rating)} (${rating}/5)`, inline: true },
+            { name: 'Motivo', value: reason },
+            { name: 'Ticket', value: `#${ticketId}` }
+          )
+          .setTimestamp()
+      ],
+      allowedMentions: { parse: [] }
+    });
+    reviewSent = true;
+
+    await interaction.editReply({ content: 'Obrigado por avaliar o atendimento! Sua avaliação foi enviada.' });
+  } catch (error) {
+    console.error('Erro ao registrar avaliação do ticket:', error);
+    if (!reviewSent && promptDisabled) {
+      await promptMessage.edit({
+        components: [buildRatingButtons(ticketId, staffId)]
+      }).catch(editError => {
+        console.error('Erro ao reativar os botões da avaliação:', editError);
+      });
+    }
+
+    const response = { content: 'Não foi possível enviar sua avaliação. Tente novamente mais tarde.' };
+    if (interaction.deferred || interaction.replied) {
+      await interaction.editReply({
+        content: reviewSent
+          ? 'Sua avaliação foi enviada, mas não consegui confirmar o envio nesta DM.'
+          : response.content
+      }).catch(replyError => {
+        console.error('Erro ao confirmar o resultado da avaliação:', replyError);
+      });
+    } else {
+      await interaction.reply(response).catch(replyError => {
+        console.error('Erro ao responder sobre a avaliação:', replyError);
+      });
+    }
+  }
 }
 
 async function loadTicketSystem(client) {
@@ -365,7 +542,7 @@ async function closeTicket(interaction) {
     });
   }
 
-  await interaction.editReply({ content: '✅ Transcript enviado. O ticket será fechado.' });
+  await interaction.editReply({ content: '✅ Transcript enviado. Fechando o ticket...' });
   try {
     await channel.delete(`Ticket fechado por ${interaction.user.tag}`);
   } catch (error) {
@@ -374,10 +551,36 @@ async function closeTicket(interaction) {
       content: '⚠️ O transcript foi enviado, mas não consegui apagar o canal. Remova-o manualmente.',
       flags: MessageFlags.Ephemeral
     });
+    return;
+  }
+
+  try {
+    await sendRatingRequest(interaction.client, {
+      ...metadata,
+      closedBy: interaction.user.id
+    }, channel.id, channel.name);
+    await interaction.followUp({
+      content: '✅ Ticket fechado. Enviei uma solicitação de avaliação por DM ao criador do ticket.',
+      flags: MessageFlags.Ephemeral
+    });
+  } catch (error) {
+    console.error(`Erro ao enviar a solicitação de avaliação do ticket ${channel.id}:`, error);
+    await interaction.followUp({
+      content: '✅ Ticket fechado, mas não consegui enviar a avaliação por DM. Verifique se o membro permite mensagens diretas do servidor.',
+      flags: MessageFlags.Ephemeral
+    });
   }
 }
 
 async function handleTicketInteraction(interaction) {
+  if (interaction.isButton() && interaction.customId.startsWith(`${TICKET_RATING_BUTTON_PREFIX}:`)) {
+    await openRatingReasonModal(interaction);
+    return true;
+  }
+  if (interaction.isModalSubmit() && interaction.customId.startsWith(`${TICKET_RATING_MODAL_PREFIX}:`)) {
+    await submitTicketRating(interaction);
+    return true;
+  }
   if (interaction.isStringSelectMenu() && interaction.customId === OPEN_TICKET_MENU_ID) {
     await openTicket(interaction);
     return true;
